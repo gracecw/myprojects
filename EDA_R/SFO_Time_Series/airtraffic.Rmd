@@ -1,0 +1,337 @@
+---
+title: "SFO Airport Traffic Time Series Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F, cache = T)
+```
+
+
+
+```{r, warning = F, message = F, include = F}
+library(tseries)
+library(car)
+library(forecast)
+library(tidyverse)
+library(magrittr)
+library(ggcorrplot)
+library(GGally)
+library(ggplot2)
+
+train <- read_csv("/users/grace/desktop/train.csv")
+test <- read_csv("/users/grace/desktop/test.csv")
+
+train %<>% na.omit()
+passenger <-ts(train$Passenger, start = c(2006, 1), end =c(2016, 12), frequency = 12)
+fuel <-ts(train$fuel_price, start = c(2006, 1), 
+           end =c(2016, 12), frequency = 12)
+airplane <- ts(train$airplane, start = c(2006, 1), 
+           end =c(2016, 12), frequency = 12)
+cpi <- ts(train$CPI, start = c(2006, 1), 
+           end =c(2016, 12), frequency = 12)
+rain <- ts(train$avg_rain, start = c(2006, 1), 
+           end =c(2016, 12), frequency = 12)
+
+passenger.train <- window(passenger, start = c(2006,1), end = c(2015,12))
+passenger.test <- window(passenger, start = c(2016,1), end = c(2016,12))
+fuel.train <- window(fuel, start = c(2006,1), end = c(2015,12))
+fuel.test <- window(fuel, start = c(2016,1), end = c(2016,12))
+airplane.train <- window(airplane, start = c(2006,1), end = c(2015,12))
+airplane.test <- window(airplane, start = c(2016,1), end = c(2016,12))
+cpi.train <- window(cpi, start = c(2006,1), end = c(2015,12))
+cpi.test <- window(cpi, start = c(2016,1), end = c(2016,12))
+rain.train <- window(rain, start = c(2006,1), end = c(2015,12))
+rain.test <- window(rain, start = c(2016,1), end = c(2016,12))
+```
+
+
+This project aims to build a predictive model to forecast SFO airport monthly passenger traffic in 2017 with highest possible accuracy, given monthly data from January 2006 to December 2016 on SFO monly airport traffic (including departure, arrival and transit), fuel prices, passenger flight traffic, monthly rainfall and consumer price index in San Francisco, then selected the optimal model and used it for forecasting. 
+
+Let's will first explore the data：
+
+## Data Overview:
+The available dataset consists of monthly data from January 2005 to December 2006 on the 5 variables: SFO passenger traffic, passenger flight traffic, monthly rainfall in San Francisdo and consumer price index in San Francisco & Oakland area. The four plots below correspond to each of the variable over time.
+ 
+```{r, echo = F, fig.height = 6.5, warning = F, message = F}
+library(timetk)
+library(gridExtra)
+library(scales)
+df_passenger <- tk_tbl(passenger)
+df_fuel <- tk_tbl(fuel)
+df_airplane <- tk_tbl(airplane)
+df_cpi <- tk_tbl(cpi)
+df_rain <- tk_tbl(rain)
+p1 <- ggplot(df_passenger, aes(x=index, y = value )) + geom_line() + xlab("Year") +
+  ylab("SFO Passenger Traffic")
+p2 <- ggplot(df_fuel, aes(x=index, y = value )) + geom_line() + xlab("Year") +
+  ylab("Jet Fuel Price")
+p3 <- ggplot(df_airplane, aes(x=index, y = value )) + geom_line() + xlab("Year") +
+  ylab("Number of Airplanes")
+p4 <- ggplot(df_cpi, aes(x=index, y = value )) + geom_line() + xlab("Year") +
+  ylab("CPI")
+p5 <- ggplot(df_rain, aes(x=index, y = value )) + geom_line() + xlab("Year") +
+  ylab("Monthly Rain Fall")
+grid.arrange(p1,p2,p3,p4,p5)
+```
+
+
+To explore the relationship between the 5 variables, we constructed a correlation matrix. We can see that passenger traffic is highly correlated with CPI and is somewhat correlated with flight traffic. Flight traffic rate has a smaller, and negative, correlation with fuel price. Variables with medium to high correlation are of interest because they can possibly be used as covariates to help accurately predict passenger traffic. 
+```{r}
+ggcorr(train[, -1],  palette = "RdGy", label = TRUE, label_size = 3, label_color = "black")
+```
+
+## Method
+
+In order to find the best model, we split our training data into training and validation set. The training set consists of observations from January 2006 to December 2015, and is used for constructing the models. The last 1-year of data (12 observations) is held out to determine the predictive accuracy of the model. 
+
+We explored the following methods for modeling the traffic passenger data:
+
+•	Box-Jenkins Methods: including ARIMA, SARIMA and SARIMAX, this approach works by removing the trend and seasonality through differencing the data and modeling the transformed data. 
+
+•	Holt-Winters model:  this approach works by assigning exponentially decreasing weights to older observations. Considering the trend and seasonality pattern observed in the data, we used triple exponential smoothing for modeling.
+
+•	VAR: this approach works by treating the other influential variables as endogenous variable - they influence bankruptcy rate and bankruptcy rate influences them.
+
+
+### Box-Jenkins Methods
+
+Box-Jenkin models involves statistical theory and modeling to analyze and forecast time series data. The naming standard for the various types of time series models consists of acronyms defined as the following:
+
+- **S:** *Seasonal* effects - in our case, monthly
+- **AR:** *Autoregressive* is a stochastic process in which future predictions are based on a weighted sum of previous observations
+- **I:** *Integrated* involves ordinary differencing, or subtracting observations from the previous observation in time, to make a time series stationary (mean, variance, autocorrelation constant over time)
+- **MA:** *Moving Average* is an average over many past observations
+- **X:** e*X*ogenous variables are external variables that influence the response variable but the responsen does not influence them (Example: BART ridership may be affected by weather, but weather does not depend on BART ridership)
+
+So, SARIMAX means *Seasonal Autoregressive Integrated Moving Average with Exogenous Variables*
+
+In this part， we will explore SARIMA and SARIMAX models in order to predict bankruptcy rate. SARIMA models are univariate models which depend on previous observations and try to predict future values. SARIMAX on the other hand is a multivariate time series model which has the SARIMA component but also regresses on the given multivariate data at time $t$.
+
+
+### SARIMA MODEL (Univariate Airport Passenger Traffic)
+
+Plot training data
+
+```{r}
+plot(passenger.train, ylab = "Passenger Traffic")
+```
+
+
+ACF plot suggested seasonality.
+
+```{r}
+acf(passenger.train, lag.max = 72)
+```
+
+ADF test also suggested non-stationary.
+
+```{r}
+adf.test(passenger.train, k=12)
+```
+
+Let's try differencing the time series for trend and seasonality.
+```{r}
+train1<-diff(passenger.train,differences = 1) 
+train1.12 <- diff(train1,lag=12) 
+adf.test(train1.12, k=12)
+```
+
+
+Now after differencing, the data is stationary. so d =1, D=1, s=12. Plot ACF and PACF to determine the other parameters. p=0, q=1, P=1, Q=1
+
+```{r}
+acf(train1.12, lag.max = 72)
+pacf(train1.12, lag.max = 72)
+```
+
+
+```{r}
+arima.model.011.111 <- arima(passenger.train, order = c(0,1,1), 
+    seasonal = list(order = c(1,1,1), period = 12), method = "CSS-ML")
+arima.model.011.111
+```
+
+The RMSE on the validation set is 98163.71.
+```{r}
+#rmse
+rmse <- function(true, preds){return(sqrt(mean((true - preds)**2)))}
+
+#preds
+valid.preds <- forecast(arima.model.011.111, length(passenger.test))
+valid.rmse <- rmse(as.numeric(valid.preds$mean), passenger.test)
+#valid.rmse
+```
+
+
+Applying the SARIMA model on the full data we will get the plot below. It did a pretty good job forecasting the traffic in 2017. 
+
+```{r}
+best.sarima <- arima(passenger.train, order = c(0,1,1), 
+    seasonal = list(order = c(1,1,1), period = 12), method = "CSS-ML")
+pred.sarima <- forecast(best.sarima, level = 95, h = 12)
+t.new <- seq(2016,2017,length=13)[1:12]
+plot(passenger,xlim=c(2006,2017), 
+     main = expression("SARIMA (0,1,1)(1,1,1)"[12]* "(RMSE = 0.00372)"),
+     ylab = "Passenger Traffic")
+abline(v=2016,col='blue',lty=2)
+lines(fitted(best.sarima)~seq(2006,2016,length = 121)[1:120],type='l',col=5)
+lines(pred.sarima$mean~t.new,type='l',col='red')
+lines(pred.sarima$lower~t.new,col='green') 
+lines(pred.sarima$upper~t.new,col='green') 
+legend("topleft", legend = c("Predicted", "Fitted","Lower/Upper Bounds","Actual"), col = c("red",5,"green","black"), lty = 1)
+```
+
+
+### Checking Box-Jenkins Assumptions
+
+Box-Jenkins models relies on the following assumptions regarding the residuals (difference between actual - predicted) for the models to be valid.
+
+
+- Zero-Mean: the residuals have a mean of zero
+- Homoscedasticity: the residuals have constant variance
+- Zero-Correlation: the residuals are uncorrelated
+- Normality: the residuals are normally distributed (no need to check for our subset model which is based on Least Squares rather than Maximum Likelihood Estimation)
+
+
+#### Residual Diagnostics
+```{r}
+e <- arima.model.011.111$residuals # residuals
+r <- e/sqrt(arima.model.011.111$sigma2) # standardized residuals
+```
+
+##### Zero Mean: 
+
+
+Performed a sample t test for the true mean residuals. 
+p-value = 0.5592 > 0.05  
+We cannnot reject the null hypothesis, so Zero-Mean assumption is satisfied. 
+```{r}
+t.test(e)
+```
+
+##### Homoscedasticity:
+
+We first look at the scatter plot of the residual against t. The residuals appears to be randomly scattered, suggesting the homoscedasticity assumption. should be valid 
+
+To formally test the assumption, the p-value for Levene's test is greater than 0.05. Therefore, we cannot reject the null hypothesis. Therefore, the Homoscedasticity assumption is met.
+
+```{r}
+par(mfrow=c(1,1))
+plot(e, type = "p", main="Residuals vs t", ylab="")
+abline(h=0, col="red")
+group <- c(rep(1,27),rep(2,27),rep(3,27),rep(4,27))
+leveneTest(window(e,start=c(2007,1)),group) #Levene
+```
+
+
+##### Zero-Correlation:
+
+The ACF plot does not show any significant spikes. The p-values for Ljung-Box test at different lags are all greater than 0.5, so we cannot reject the null hypothesis. The Zero-correlation assumption is met.
+
+```{r}
+tsdiag(arima.model.011.111)
+```
+
+##### Normality:  
+
+The q-q plot shows that the residual quantiles do not match well with the theoretical normal quantiles, especially at tail.
+
+Also, the p-value of Shapiro-Wilk test is smaller than 0.05, so we need to reject the null hypothesis. The normality assumption is not met. Therefore, consider using LS for estimation.
+```{r}
+qqnorm(e, main="QQ-plot of Residuals")
+qqline(e, col = "red")
+shapiro.test(e)
+```
+
+Through formal hypothesis testing, the SARIMA models satisfied the assumptions.
+
+
+### SARIMAX
+
+In this part we will use exgenous data, assuming that there is a uni-directional relationship, meaning only independent variables effect bankruptcy not the other way around. 
+
+```{r}
+exo_endo_train <- train[ 1:120, ]
+exo_endo_valid <- train[121:132, ]
+model <- arima(ts(exo_endo_train$Passenger, frequency = 12), order = c(0, 1, 1), seasonal = list(order = c(1, 1, 1), period = 12),
+                 method = 'CSS', xreg = exo_endo_train[c("airplane", "CPI")])
+```
+
+
+```{r}
+valid_rmse <- function(model, valid_ts){
+  valid.preds <- forecast(model, h = length(valid_ts),xreg = exo_endo_valid[c("airplane", "CPI")])
+  valid.rmse <- rmse(as.numeric(valid.preds$mean), valid_ts)
+  return(valid.rmse)
+}
+
+#valid_rmse(model,exo_endo_valid$Passenger)
+```
+
+Our final best model is SARIMAX(0,1,1)(1,1,1)~12~, with a rmse of ~95754.77 by using exogenous variables: flight traffic and CPI. Overall, this provides a better performance than using the univariate model. flight traffic and CPI data do add extra information to our model and provided better prediction results on the validation data.
+
+Retraining the model with the full training data
+```{r}
+best.sarimax <- arima(ts(train$Passenger, frequency = 12), order = c(0, 1, 1), seasonal = list(order = c(1, 1, 1), period = 12),
+                 method = 'CSS', xreg = train[c("airplane", "CPI")])
+pred.sarimax <- forecast(best.sarimax, level = 95, h = 12,xreg = test[c("airplane", "CPI")])
+t.new <- seq(2016,2017,length=13)[1:12]
+plot(passenger,xlim=c(2006,2017), ylim=c(2000000,5500000),
+     main = expression("SARIMAX (0,1,1)(1,1,1)"[12]* "(RMSE = 95754.77)"),
+     ylab = "Passenger Traffic")
+abline(v=2016,col='blue',lty=2)
+lines(fitted(best.sarima)~seq(2006,2016,length = 121)[1:120],type='l',col=5)
+lines(pred.sarimax$mean~t.new,type='l',col='red')
+lines(pred.sarimax$lower~t.new,col='green') 
+lines(pred.sarimax$upper~t.new,col='green') 
+legend("topleft", legend = c("Predicted", "Fitted","Lower/Upper Bounds","Actual"), col = c("red",5,"green","black"), lty = 1)
+```
+
+### Holt-Winters Methods
+
+Holt-Winters Methods involves an exponentially weighted moving average. In the context of the Canadian bankruptcy rates, our model's predictions are based on averages of previously observed bankruptcy rates, with more weight on recent data. In other words, last month is a better indicator than say, 10 years ago. This makes sense because bankruptcy rates is most certainly going to change over time. Triple Exponential Smoothing is appropriate for forecasting monthly bankruptcy rates for Canada because there is both **trend** and **seasonality**. 
+
+**Trend:** A trend exists if there is a long-term increase or decrease in bankruptcy rates. 
+
+**Seasonality:** Seasonality is when the time series exhibits similar behavior at regular intervals, or *seasons*. In our scenario, bankruptcy rates are recorded every month, and therefore the period of a season is 12 months (1 year).
+
+Furthermore, we choose to use an *additive* method because the size of the peaks are roughly the same throughout the time series. There are three parameters to be estimated: $\alpha$, $\beta$, and $\gamma$.
+
+Our best model for Holt-Winters consists of $\alpha = 0.45, \beta = 0.18, \gamma = 0.7$. 
+```{r}
+holt.model <- HoltWinters(x = log(passenger.train), seasonal = "add", alpha = 0.45, beta = 0.1, gamma = 0.7)
+
+holt.winter.pred.mult <- forecast(holt.model, h = 12)
+valid.rmse <- rmse(exp(as.numeric(holt.winter.pred.mult$mean)), passenger.test)
+#valid.rmse
+
+```
+```{r}
+holt.model
+```
+
+Lets plot the fitted value and prediction on validation set.
+
+```{r, echo = F, fig.height = 4}
+t.new <- seq(2015,2016,length=13)[1:12]
+plot(passenger.train,xlim=c(2006,2016), ylim=c(2000000,5500000),
+     main = "Additive Triple Exponential Smoothing (RMSE = 72863.32)",
+     ylab = "SFO Passenger Traffic")
+abline(v=2015,col='blue',lty=2)
+lines(exp(holt.model$fitted[,1])~seq(2007,2015,length = 109)[1:108],type='l',col=5)
+lines(exp(holt.winter.pred.mult$mean)~t.new,type='l',col='red')
+lines(exp(holt.winter.pred.mult$lower)[,2]~t.new,col='green') 
+lines(exp(holt.winter.pred.mult$upper)[,2]~t.new,col='green') 
+legend("topleft", legend = c("Predicted","Fitted","Lower/Upper Bounds","Actual"), col = c("red",5,"green","black"), lty = 1)
+```
+
+
+Although this was our best Holt-Winters model. One advantage of Holt-Winters is that it does not depend on any distribution assumptions. For interpretability purposes, this method is fairly easy to understand because it just involves exponential smoothing over and over. A disadvantage of this model is that it is heavily dependent on the most recent data in the training set. Overall, in terms of RMSE, this Holt-Winter models are produced the smallest MSE, however it does not seem to fit the historical patterns as well as SARIMA models.
+
+
+### VAR - Vector Autoregression
+
+Vector Autoregressive models are used for multivariate time series. The model assumes that the variables are endogenous - they influence each other, so in this model each variable is a linear function of past lags of itself and past lags of the other variables. As in our case, we believe airport traffic is affected by other external factors, so this model does not apply for this case.
+
+

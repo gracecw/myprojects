@@ -1,0 +1,17 @@
+base
+tseries
+car
+forecast
+tidyverse
+ggplot2
+tibble
+tidyr
+readr
+purrr
+dplyr
+magrittr
+ggcorrplot
+timetk
+gridExtra
+scales
+GGally
