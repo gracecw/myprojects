@@ -1,0 +1,6 @@
+- IMBD_Sentiment: IMBD Movie Review Sentement Analysis
+- NN_MNIST: Recognize hand-written digits in MNIST Dataset using Pytorch
+- NN_transfer_learning: Apply transfered learning - use pretrained RESNET CNN to classifiy ants vs bees; cats vs dogs
+- Recommendation: Collaborative filtering for recommendation system
+- SF_Parking: Predict San Francisco parking availability
+- Yelp_Sentiment_Analysis: Yelp review sentiment analysis in distributed system with Apache Spark 
