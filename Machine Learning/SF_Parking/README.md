@@ -4,6 +4,8 @@ This repo documents our work for the final project of Advanced Machine Learning 
 
 The goal of the project is to predict whether a parking spot is available at a given date time on a given street for the time period between March 2014 and November 2016. We used all three datasets provided for the model, namely 'train-parking.csv', 'ParkingSensorData.csv', and 'parkingrecords.csv'. We refer them as training data, sensor data, and records data respectively.
 
+We performed extensive data preprocessing and feature engineering including geocoding physical addresses and creating street clusters, and built a predictive model using random forest classifier which achieved best F1 of 0.63. 
+
 For better version control and easier future reference we have put our work to four separate folders as shown above. Below we describe the contents in each folder.
 
 ### Data Folder:
