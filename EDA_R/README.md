@@ -1,3 +1,4 @@
-- EDA_Traffic_Stops: Explore the dataset of traffic stop records by police officers in Charlotte, North Carolina
-- Red Wine Quality: Explore the factors influencing red wine quality
-- SFO_Time_Series: Time series analysis for SFO airport passenger traffic
+### Project List
+- **EDA_Traffic_Stops**: Explore the dataset of traffic stop records by police officers in Charlotte, North Carolina
+- **Red Wine Quality**: Explore the factors influencing red wine quality
+- **SFO_Time_Series**: Time series analysis for SFO airport passenger traffic
