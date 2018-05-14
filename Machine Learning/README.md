@@ -5,3 +5,4 @@
 - **Recommendation**: Collaborative filtering for recommendation system
 - **SF_Parking**: Predict San Francisco parking availability
 - **Yelp_Sentiment_Analysis**: Yelp review sentiment analysis in distributed system with Apache Spark 
+- **Char-rnn (work in progress)**: RNN novel writer - Character level RNN text generator (training on English and Chinese novels) 
